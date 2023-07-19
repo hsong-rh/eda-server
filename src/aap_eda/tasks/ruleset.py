@@ -26,6 +26,27 @@ from aap_eda.services.ruleset.activate_rulesets import ActivateRulesets
 logger = logging.getLogger(__name__)
 
 
+@job("manager")
+def activate(
+    is_restart: bool,
+    activation_id: int,
+    deployment_type: str,
+    ws_base_url: str,
+    ssl_verify: str,
+) -> None:
+    queue = get_queue()
+    queue.enqueue(
+        activate_rulesets,
+        args=(
+            True,
+            activation_id,
+            deployment_type,
+            ws_base_url,
+            ssl_verify,
+        ),
+    )
+
+
 @job
 def activate_rulesets(
     is_restart: bool,
@@ -52,11 +73,12 @@ def activate_rulesets(
     )
 
 
-@job
-def deactivate_rulesets(
-    instance: models.ActivationInstance,
+@job("manager")
+def deactivate(
+    activation_instance_id: int,
     deployment_type: str,
 ) -> None:
+    instance = models.ActivationInstance.objects.get(pk=activation_instance_id)
     logger.info(f"Task started: Deactivate Activation ({instance.id})")
 
     ActivateRulesets().deactivate(

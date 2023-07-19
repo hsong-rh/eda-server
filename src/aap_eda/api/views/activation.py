@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from aap_eda.api import exceptions as api_exc, filters, serializers
 from aap_eda.core import models
 from aap_eda.core.enums import Action, ActivationStatus, ResourceType
-from aap_eda.tasks.ruleset import activate_rulesets, deactivate_rulesets
+from aap_eda.tasks.ruleset import activate, deactivate
 
 
 def handle_activation_create_conflict(activation):
@@ -102,7 +102,7 @@ class ActivationViewSet(
         activation["rules_fired_count"] = 0
 
         if response.is_enabled:
-            activate_rulesets.delay(
+            activate.delay(
                 is_restart=False,
                 activation_id=response.id,
                 deployment_type=settings.DEPLOYMENT_TYPE,
@@ -175,7 +175,7 @@ class ActivationViewSet(
             activation_id=activation.id
         )
         for instance in instances:
-            deactivate_rulesets(instance, settings.DEPLOYMENT_TYPE)
+            deactivate.delay(instance.id, settings.DEPLOYMENT_TYPE)
         super().perform_destroy(activation)
 
     @extend_schema(
@@ -252,7 +252,7 @@ class ActivationViewSet(
             update_fields=["is_enabled", "failure_count", "modified_at"]
         )
 
-        activate_rulesets.delay(
+        activate.delay(
             is_restart=False,
             activation_id=pk,
             deployment_type=settings.DEPLOYMENT_TYPE,
@@ -291,8 +291,8 @@ class ActivationViewSet(
             ).first()
 
             if current_instance:
-                deactivate_rulesets(
-                    instance=current_instance,
+                deactivate.delay(
+                    activation_instance_id=current_instance.id,
                     deployment_type=settings.DEPLOYMENT_TYPE,
                 )
 
@@ -321,12 +321,12 @@ class ActivationViewSet(
         ).first()
 
         if instance_running:
-            deactivate_rulesets(
-                instance=instance_running,
+            deactivate.delay(
+                activation_instance_id=instance_running.id,
                 deployment_type=settings.DEPLOYMENT_TYPE,
             )
 
-        activate_rulesets.delay(
+        activate.delay(
             is_restart=False,  # increment restart_count here instead of by task # noqa: E501
             activation_id=pk,
             deployment_type=settings.DEPLOYMENT_TYPE,

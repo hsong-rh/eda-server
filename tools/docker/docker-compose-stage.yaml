@@ -75,6 +75,27 @@ services:
     volumes:
       - ${EDA_HOST_PODMAN_SOCKET_URL:-/run/user/1000/podman/podman.sock}:/run/podman/podman.sock:z
 
+  eda-manager:
+    user: "${EDA_POD_USER_ID:-0}"
+    deploy:
+      replicas: ${EDA_NUM_WORKERS:-2}
+    image: "${EDA_IMAGE:-quay.io/ansible/eda-server:main}"
+    environment: *common-env
+    command:
+      - aap-eda-manage
+      - rqworker
+      - --with-scheduler
+      - --worker-class
+      - aap_eda.core.tasking.Manager
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: always
+    volumes:
+      - ${EDA_HOST_PODMAN_SOCKET_URL:-/run/user/1000/podman/podman.sock}:/run/podman/podman.sock:z
+
   postgres:
     image: 'docker.io/library/postgres:13'
     environment:
