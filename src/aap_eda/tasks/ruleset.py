@@ -17,10 +17,11 @@ from datetime import datetime, timedelta
 
 from django.conf import settings
 from django_rq import get_scheduler
+from rq.job import JobStatus
 
 from aap_eda.core import models
 from aap_eda.core.enums import ActivationStatus
-from aap_eda.core.tasking import job
+from aap_eda.core.tasking import get_queue, job
 from aap_eda.services.ruleset.activate_rulesets import ActivateRulesets
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,67 @@ def activate_rulesets(
         activation.save(update_fields=["restart_count", "modified_at"])
     logger.info(f"Task started: Activate rulesets ({activation.name})")
 
-    instance = ActivateRulesets().activate(
-        activation,
-        deployment_type,
-        ws_base_url,
-        ssl_verify,
-    )
+    if activation.is_enabled:
+        instance = ActivateRulesets().activate(
+            activation,
+            deployment_type,
+            ws_base_url,
+            ssl_verify,
+        )
 
-    logger.info(
-        f"Task finished: Rulesets ({activation.name}) {instance.status=}."
-    )
+        logger.info(
+            f"Task finished: Rulesets ({activation.name}) {instance.status=}."
+        )
+    else:
+        logger.info(
+            f"Task finished: Rulesets ({activation.name}) has been disabled."
+        )
+
+
+@job("default")
+def deactivate(
+    activation_id: int,
+):
+    activation = models.Activation.objects.get(id=activation_id)
+    logger.info(f"Task started: Deactivate Activation ({activation.name})")
+
+    # clear the job from rq if it's pending/running
+    job_id = activation.current_job_id
+
+    if job_id:
+        queue = get_queue(name="activation")
+        job = queue.fetch_job(job_id)
+        if job and job.get_status(refresh=True) in [
+            JobStatus.QUEUED,
+            JobStatus.STARTED,
+            JobStatus.DEFERRED,
+            JobStatus.SCHEDULED,
+        ]:
+            job.cancel()
+            logger.info(
+                f"The job: {job.id} for activation: {activation.name}"
+                f" is canceled from the queue: {queue.name}"
+            )
+
+        activation.current_job_id = None
+        activation.save()
+
+    # deactivate activation instance if available
+    current_instance = models.ActivationInstance.objects.filter(
+        activation_id=activation_id,
+        status__in=[
+            ActivationStatus.STARTING,
+            ActivationStatus.PENDING,
+            ActivationStatus.RUNNING,
+            ActivationStatus.UNRESPONSIVE,
+        ],
+    ).first()
+
+    if current_instance:
+        ActivateRulesets().deactivate(
+            instance=current_instance,
+            deployment_type=settings.DEPLOYMENT_TYPE,
+        )
 
 
 @job("default")
@@ -58,7 +110,9 @@ def deactivate_rulesets(
     deployment_type: str,
 ) -> None:
     instance = models.ActivationInstance.objects.get(pk=activation_instance_id)
-    logger.info(f"Task started: Deactivate Activation ({instance.id})")
+    logger.info(
+        f"Task started: Deactivate Activation Instance ({instance.id})"
+    )
 
     ActivateRulesets().deactivate(
         instance,
