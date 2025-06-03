@@ -727,9 +727,8 @@ class ActivationManager(StatusManager):
             return
 
         try:
-            if self.db_instance.status != ActivationStatus.ERROR:
-                self.set_status(ActivationStatus.STOPPING)
-            self._stop_instance()
+            if self.db_instance.status == ActivationStatus.STOPPING:
+                self._stop_instance()
 
         except engine_exceptions.ContainerEngineError as exc:
             msg = (
