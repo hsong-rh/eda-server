@@ -14,18 +14,26 @@
 
 """Dispatcherctl management command for debug tools."""
 
+import argparse
+import inspect
 import logging
+import os
 
 import yaml
+from dispatcherd.cli import (
+    CONTROL_ARG_SCHEMAS,
+    DEFAULT_CONFIG_FILE,
+    _base_cli_parent,
+    _build_command_data_from_args,
+    _control_common_parent,
+    _register_control_arguments,
+)
 from dispatcherd.config import setup as dispatcherd_setup
 from dispatcherd.factories import get_control_from_settings
 from dispatcherd.service import control_tasks
 from django.conf import settings
-from django.core.management.base import (
-    BaseCommand,
-    CommandError,
-    CommandParser,
-)
+from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.db import connection
 
 from aap_eda.utils.logging import startup_logging
 
@@ -46,182 +54,87 @@ class Command(BaseCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         """Add command line arguments for debug commands."""
         parser.description = (
-            "Dispatcherctl debug tools. For worker services, use "
-            "'aap-eda-manage dispatcherd'."
+            "Run dispatcherd control commands using aap-eda-manage."
         )
+        base_parent = _base_cli_parent()
+        control_parent = _control_common_parent()
+        parser._add_container_actions(base_parent)
+        parser._add_container_actions(control_parent)
 
         subparsers = parser.add_subparsers(dest="command", metavar="command")
-        subparsers.required = False
-
-        # Dynamically add debug commands from dispatcherd
+        subparsers.required = True
+        shared_parents = [base_parent, control_parent]
         for command in control_tasks.__all__:
-            command_func = getattr(control_tasks, command)
-            if hasattr(command_func, "__doc__") and command_func.__doc__:
-                help_text = command_func.__doc__.strip()
-            else:
-                help_text = f"Run {command} debug command"
-
-            command_parser = subparsers.add_parser(command, help=help_text)
-
-            # Common arguments for all debug commands
-            command_parser.add_argument(
-                "--task",
-                type=str,
-                help="Task name to filter on.",
+            func = getattr(control_tasks, command, None)
+            doc = inspect.getdoc(func) or ""
+            summary = doc.splitlines()[0] if doc else None
+            command_parser = subparsers.add_parser(
+                command,
+                help=summary,
+                description=doc,
+                parents=shared_parents,
             )
-            command_parser.add_argument(
-                "--uuid",
-                type=str,
-                help="Task uuid to filter on.",
+            _register_control_arguments(
+                command_parser, CONTROL_ARG_SCHEMAS.get(command)
             )
-            command_parser.add_argument(
-                "--expected-replies",
-                type=int,
-                default=1,
-                help="Expected number of replies.",
-            )
-
-            # Add set_log_level specific argument
-            if command == "set_log_level":
-                command_parser.add_argument(
-                    "--log-level",
-                    type=str,
-                    required=True,
-                    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                    help="Python log level to set.",
-                )
-
-            # Add aio_tasks specific argument
-            if command == "aio_tasks":
-                command_parser.add_argument(
-                    "--limit",
-                    type=int,
-                    default=1,
-                    required=False,
-                    help="Maximum number of async tasks to return.",
-                )
-
-    def handle_debug_subcommand(self, command: str, **options) -> None:
-        """Handle debug commands.
-
-        Args:
-            command: Debug command to execute
-            **options: Command options
-        """
-        expected_replies = options.get("expected_replies", 1)
-
-        # Validate debug command (dynamic discovery)
-        available_commands = control_tasks.__all__
-        if command not in available_commands:
-            raise CommandError(
-                f"Invalid debug command '{command}'. "
-                f"Must be one of: {', '.join(available_commands)}"
-            )
-
-        try:
-            # Setup dispatcherd control interface
-            dispatcherd_setup(settings.DISPATCHERD_DEFAULT_SETTINGS)
-            ctl = get_control_from_settings()
-
-            # Build command data (simplified version)
-            data = {}
-            for field in ("task", "uuid"):
-                val = options.get(field)
-                if val:
-                    data[field] = val
-
-            # Add log level for set_log_level command
-            if command == "set_log_level":
-                log_level = options.get("log_level")
-                if not log_level:
-                    raise CommandError(
-                        f"--log-level is required for {command} command"
-                    )
-                data["level"] = log_level
-
-            # Execute control command
-            returned = ctl.control_with_reply(
-                command=command,
-                data=data,
-                expected_replies=expected_replies,
-            )
-
-            # Check if we got enough replies (essential check from AWX)
-            if len(returned) < expected_replies:
-                logger.error(
-                    f"Obtained only {len(returned)} of {expected_replies}"
-                )
-                raise CommandError(
-                    "dispatcherctl returned fewer replies than expected"
-                )
-
-            # Format and output results
-            if len(returned) == 1:
-                # Single reply - output directly
-                result = returned[0]
-            else:
-                # Multiple replies - create dict with reply indexes
-                result = {
-                    f"reply-{i}": reply for i, reply in enumerate(returned)
-                }
-
-            formatted_output = yaml.dump(result, default_flow_style=False)
-            self.stdout.write(formatted_output)
-
-        except Exception as e:
-            # Simplified error handling (following AWX approach)
-            logger.error(
-                f"Unexpected dispatcherctl debug command error: {e}",
-                exc_info=True,
-            )
-            raise CommandError(f"Command failed: {e}")
 
     def handle(self, *args, **options) -> None:
-        """Handle dispatcherctl debug command routing.
-
-        Args:
-            *args: Command arguments
-            **options: Command options
-        """
+        """Handle dispatcherctl debug command routing."""
         command = options.get("command")
+        if not command:
+            raise CommandError("No dispatcher control command specified")
 
-        if command is None:
-            # No subcommand provided - show available debug commands
-            available_commands = ", ".join(control_tasks.__all__)
-            self.stdout.write(
-                self.style.SUCCESS(
-                    "Dispatcherctl debug tools\n\n"
-                    f"Available debug commands: {available_commands}\n\n"
-                    "Note: Debug commands require a running dispatcher "
-                    "service.\n"
-                    "Start a dispatcher service first:\n"
-                    "  aap-eda-manage dispatcherd --worker-class "
-                    "<WorkerType>\n\n"
-                    "Usage:\n"
-                    f"  aap-eda-manage dispatcherctl <command>\n\n"
-                    "For worker services, use:\n"
-                    "  aap-eda-manage dispatcherd --worker-class "
-                    "<WorkerType>\n"
-                )
+        for django_opt in (
+            "verbosity",
+            "traceback",
+            "no_color",
+            "force_color",
+            "skip_checks",
+        ):
+            options.pop(django_opt, None)
+
+        config_path = os.path.abspath(
+            options.pop("config", DEFAULT_CONFIG_FILE)
+        )
+        expected_replies = options.pop("expected_replies", 1)
+
+        env_config = os.getenv("DISPATCHERD_CONFIG_FILE")
+        default_config = os.path.abspath(DEFAULT_CONFIG_FILE)
+        if config_path != default_config:
+            raise CommandError(
+                "The config path CLI option is not allowed for the "
+                "aap-eda-manage command"
             )
-            return
-
-        # Check if the command is available in control_tasks
-        if command in control_tasks.__all__:
-            # Remove command from options to avoid duplicate parameter
-            debug_options = {
-                k: v for k, v in options.items() if k != "command"
-            }
-            self.handle_debug_subcommand(command, **debug_options)
+        if connection.vendor == "sqlite":
+            raise CommandError(
+                "dispatcherctl is not supported with sqlite3; use a "
+                "PostgreSQL database"
+            )
+        elif env_config:
+            logger.warning(
+                "Using config from environment variable "
+                f"DISPATCHERD_CONFIG_FILE={env_config}"
+            )
+            dispatcherd_setup()
         else:
-            # Unknown command
-            available_commands = ", ".join(control_tasks.__all__)
-            self.stderr.write(
-                self.style.ERROR(
-                    f"Unknown debug command '{command}'.\n"
-                    f"Available commands: {available_commands}\n"
-                    "For worker services, use: aap-eda-manage dispatcherd "
-                    "--worker-class <WorkerType>"
-                )
+            logger.info(
+                "Using config generated from "
+                "settings.DISPATCHERD_DEFAULT_SETTINGS"
             )
-            raise CommandError(f"Unknown subcommand: {command}")
+            dispatcherd_setup(settings.DISPATCHERD_DEFAULT_SETTINGS)
+
+        schema_namespace = argparse.Namespace(**options)
+        data = _build_command_data_from_args(schema_namespace, command)
+
+        ctl = get_control_from_settings()
+        returned = ctl.control_with_reply(
+            command, data=data, expected_replies=expected_replies
+        )
+        self.stdout.write(yaml.dump(returned, default_flow_style=False))
+        if len(returned) < expected_replies:
+            logger.error(
+                f"Obtained only {len(returned)} of {expected_replies}"
+            )
+            raise CommandError(
+                "dispatcherctl returned fewer replies than expected"
+            )
