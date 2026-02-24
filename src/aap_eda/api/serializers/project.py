@@ -57,6 +57,7 @@ class ProjectSerializer(serializers.ModelSerializer, ProxyFieldMixin):
             "git_hash",
             "import_state",
             "import_error",
+            "import_warnings",
             "created_at",
             "modified_at",
         ]
@@ -311,6 +312,7 @@ class ProjectReadSerializer(serializers.ModelSerializer, ProxyFieldMixin):
             "git_hash",
             "import_state",
             "import_error",
+            "import_warnings",
             "created_at",
             "modified_at",
         ]
@@ -364,12 +366,15 @@ class ProjectReadSerializer(serializers.ModelSerializer, ProxyFieldMixin):
             "verify_ssl": project.verify_ssl,
             "organization": organization,
             "eda_credential": eda_credential,
-            "signature_validation_credential": signature_validation_credential,
-            "update_revision_on_launch": project.update_revision_on_launch,
-            "scm_update_cache_timeout": project.scm_update_cache_timeout,
+            "signature_validation_credential": (
+                signature_validation_credential
+            ),
+            "update_revision_on_launch": (project.update_revision_on_launch),
+            "scm_update_cache_timeout": (project.scm_update_cache_timeout),
             "last_synced_at": project.last_synced_at,
             "import_state": project.import_state,
             "import_error": project.import_error,
+            "import_warnings": project.import_warnings,
             "created_at": project.created_at,
             "modified_at": project.modified_at,
             "created_by": BasicUserSerializer(project.created_by).data,
@@ -401,7 +406,7 @@ def get_proxy_for_display(proxy: str) -> str:
     cred, domain = result.netloc.split("@")
     if ":" in cred:
         user, _ = cred.split(":")
-        domain = f"{user}:{ENCRYPTED_STRING}@{domain}"
+        domain = f"{user}:{ENCRYPTED_STRING}@{domain}"  # noqa: E231
     else:
         domain = f"{ENCRYPTED_STRING}@{domain}"
 

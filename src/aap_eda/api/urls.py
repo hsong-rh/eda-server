@@ -56,6 +56,7 @@ router.register("decision-environments", views.DecisionEnvironmentViewSet)
 router.register("organizations", views.OrganizationViewSet)
 router.register("teams", views.TeamViewSet)
 router.register("event-streams", views.EventStreamViewSet)
+router.register("schedules", views.ScheduleViewSet)
 router.register(
     "external_event_stream",
     views.ExternalEventStreamViewSet,
@@ -85,6 +86,10 @@ openapi_urls = [
     ),
 ]
 
+project_schedule_list = views.ProjectScheduleViewSet.as_view(
+    {"get": "list", "post": "create"}
+)
+
 eda_v1_urls = [
     path("config/", views.ConfigView.as_view(), name="config"),
     path("status/", core_views.StatusView.as_view(), name="status"),
@@ -105,6 +110,11 @@ eda_v1_urls = [
         name="token-refresh",
     ),
     path("users/me/", views.CurrentUserView.as_view(), name="current-user"),
+    path(
+        "projects/<int:project_id>/schedules/",
+        project_schedule_list,
+        name="project-schedule-list",
+    ),
     *router.urls,
 ]
 

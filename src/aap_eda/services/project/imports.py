@@ -68,7 +68,8 @@ def _project_import_wrapper(
             project.import_state = models.Project.ImportState.COMPLETED
             project.import_error = error
         except ProjectImportWarning as e:
-            # import status should show completed but with an error message
+            # import status should show completed but with an
+            # error message
             project.import_state = models.Project.ImportState.COMPLETED
             project.import_error = str(e)
         except Exception as e:
@@ -76,9 +77,15 @@ def _project_import_wrapper(
             project.import_error = str(e)
             error = e
         finally:
+            project.import_warnings = self._warnings
             try:
                 project.save(
-                    update_fields=["import_state", "import_error", "git_hash"]
+                    update_fields=[
+                        "import_state",
+                        "import_error",
+                        "import_warnings",
+                        "git_hash",
+                    ]
                 )
             except exceptions.ObjectDoesNotExist:
                 raise ProjectImportError(
@@ -89,7 +96,7 @@ def _project_import_wrapper(
                     raise error
                 elif error:
                     raise ProjectImportError(
-                        f"Failed to import the project: {str(error)}"
+                        "Failed to import the project:" f" {str(error)}"
                     ) from error
 
     return wrapper
@@ -100,15 +107,18 @@ class ProjectImportService:
         if scm_cls is None:
             scm_cls = ScmRepository
         self._scm_cls = scm_cls
+        self._warnings: list[dict[str, str]] = []
 
     @_project_import_wrapper
     def import_project(self, project: models.Project) -> None:
+        self._warnings = []
         with self._clone_and_process(project) as (repo_dir, git_hash):
             project.git_hash = git_hash
             self._import_rulebooks(project, repo_dir)
 
     @_project_import_wrapper
     def sync_project(self, project: models.Project) -> None:
+        self._warnings = []
         with self._clone_and_process(project) as (repo_dir, git_hash):
             # At this point project.import_state and
             # project.import_error have been cleared. We are relying on
@@ -237,40 +247,58 @@ class ProjectImportService:
                 _base, ext = os.path.splitext(filename)
                 if ext not in YAML_EXTENSIONS:
                     continue
+                relpath = os.path.relpath(path, rulebooks_dir)
                 try:
                     info = self._try_load_rulebook(rulebooks_dir, path)
-                except Exception:
+                except Exception as e:
                     logger.error(
-                        "Unexpected exception when scanning file %s."
-                        " Skipping.",
+                        "Unexpected exception when scanning"
+                        " file %s. Skipping.",
                         path,
                         exc_info=settings.DEBUG,
                     )
+                    self._warnings.append(
+                        {
+                            "file": relpath,
+                            "error": str(e),
+                        }
+                    )
                     continue
                 if not info:
-                    logger.warning("Not a rulebook file: %s", path)
                     continue
                 yield info
 
     def _try_load_rulebook(
         self, rulebooks_dir: StrPath, rulebook_path: StrPath
     ) -> Optional[RulebookInfo]:
+        relpath = os.path.relpath(rulebook_path, rulebooks_dir)
         with open(rulebook_path) as f:
             raw_content = f.read()
 
         try:
             content = yaml.safe_load(raw_content)
         except yaml.YAMLError as exc:
-            logger.warning("Invalid YAML file %s: %s", rulebook_path, exc)
+            msg = f"Invalid YAML: {exc}"
+            logger.warning(
+                "Invalid YAML file %s: %s",
+                rulebook_path,
+                exc,
+            )
+            self._warnings.append({"file": relpath, "error": msg})
             return None
 
         try:
             self._validate_rulebook_file(content)
         except MalformedError as exc:
-            logger.warning("Malformed rulebook %s: %s", rulebook_path, exc)
+            msg = f"Malformed rulebook: {exc}"
+            logger.warning(
+                "Malformed rulebook %s: %s",
+                rulebook_path,
+                exc,
+            )
+            self._warnings.append({"file": relpath, "error": msg})
             return None
 
-        relpath = os.path.relpath(rulebook_path, rulebooks_dir)
         return RulebookInfo(
             relpath=relpath,
             raw_content=raw_content,

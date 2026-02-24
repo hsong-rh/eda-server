@@ -67,9 +67,10 @@ class Project(BaseOrgModel, UniqueNamedModel, PrimordialModel):
 
     class ScmType(models.TextChoices):
         GIT = "git"
+        ARCHIVE = "archive"
 
     description = models.TextField(default="", blank=True, null=False)
-    url = models.TextField(null=False)
+    url = models.TextField(null=True, blank=True, default="")
     proxy = EncryptedTextField(blank=True, default="")
     git_hash = models.TextField()
     verify_ssl = models.BooleanField(default=True)
@@ -87,6 +88,7 @@ class Project(BaseOrgModel, UniqueNamedModel, PrimordialModel):
     )
     import_task_id = models.UUIDField(null=True, default=None)
     import_error = models.TextField(null=True, default=None)
+    import_warnings = models.JSONField(default=list, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, null=False)
     modified_at = models.DateTimeField(auto_now=True, null=False)

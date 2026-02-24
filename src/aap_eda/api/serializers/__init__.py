@@ -73,6 +73,11 @@ from .rulebook import (
     RulebookRefSerializer,
     RulebookSerializer,
 )
+from .schedule import (
+    ScheduleCreateSerializer,
+    ScheduleSerializer,
+    ScheduleUpdateSerializer,
+)
 from .source import SourceSerializer
 from .team import (
     TeamCreateSerializer,
@@ -155,4 +160,8 @@ __all__ = (
     # event streams
     "EventStreamInSerializer",
     "EventStreamOutSerializer",
+    # schedules
+    "ScheduleSerializer",
+    "ScheduleCreateSerializer",
+    "ScheduleUpdateSerializer",
 )

@@ -36,6 +36,7 @@ from .rulebook_process import (
     RulebookProcessLog,
     RulebookProcessQueue,
 )
+from .schedule import Schedule
 from .setting import Setting
 from .team import Team
 from .user import AwxToken, User
@@ -65,6 +66,7 @@ __all__ = [
     "Organization",
     "Team",
     "EventStream",
+    "Schedule",
     "Setting",
 ]
 
@@ -81,6 +83,7 @@ permission_registry.register(
 )
 permission_registry.register(
     Rulebook,
+    Schedule,
     parent_field_name="project",
 )
 permission_registry.register(

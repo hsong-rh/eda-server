@@ -314,5 +314,10 @@ def test_project_import_with_invalid_rulebooks(
 
     assert project.git_hash == "adc83b19e793491b1c6ea0fd8b46cd9f32e592fc"
     assert project.import_state == models.Project.ImportState.COMPLETED
-    assert caplog.text.count("WARNING") == 20
+    assert caplog.text.count("WARNING") == 10
     assert project.rulebook_set.count() == 1
+    # Verify import_warnings captures per-file errors
+    assert len(project.import_warnings) == 10
+    for warning in project.import_warnings:
+        assert "file" in warning
+        assert "error" in warning
