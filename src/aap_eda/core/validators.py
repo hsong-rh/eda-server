@@ -551,6 +551,13 @@ def check_if_scm_url_valid(url: str) -> str:
     return url
 
 
+def check_if_scm_url_valid_optional(url: str) -> str:
+    """Validate SCM URL, allowing empty strings for Manual SCM."""
+    if not url:
+        return url
+    return check_if_scm_url_valid(url)
+
+
 def check_if_branch_valid(branch: str) -> str:
     if not is_refspec_valid(branch, is_branch=True):
         raise serializers.ValidationError("Invalid branch/tag/commit")

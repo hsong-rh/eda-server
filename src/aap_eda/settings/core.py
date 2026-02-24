@@ -159,6 +159,11 @@ DISPATCHERD_SCHEDULE_TASKS = {
 }
 
 
+# ---------------------------------------------------------
+# PROJECT SETTINGS
+# ---------------------------------------------------------
+MAX_PROJECT_ARCHIVE_SIZE = 100 * 1024 * 1024  # 100MB
+
 ANSIBLE_BASE_CUSTOM_VIEW_PARENT = "aap_eda.api.views.dab_base.BaseAPIView"
 
 # ---------------------------------------------------------

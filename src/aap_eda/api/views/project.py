@@ -308,6 +308,12 @@ class ProjectViewSet(
             # if user has sync permission for this project
             self.check_object_permissions(request, project)
 
+            # Manual projects cannot be synced
+            if not project.scm_type:
+                raise api_exc.Conflict(
+                    detail="Manual projects cannot be synced."
+                )
+
             if project.import_state in [
                 models.Project.ImportState.PENDING,
                 models.Project.ImportState.RUNNING,

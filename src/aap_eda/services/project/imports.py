@@ -27,7 +27,13 @@ from django.core import exceptions
 
 from aap_eda.core import models
 from aap_eda.core.types import StrPath
+from aap_eda.core.utils import credentials
 from aap_eda.core.utils.rulebook import get_rulebook_hash
+from aap_eda.services.project.archive import (
+    _extract_archive,
+    _sha1_file,
+    download_and_extract,
+)
 from aap_eda.services.project.scm import ScmRepository
 
 logger = logging.getLogger(__name__)
@@ -144,23 +150,75 @@ class ProjectImportService:
         with self._temporary_directory() as tempdir:
             repo_dir = os.path.join(tempdir, "src")
 
-            proxy = project.proxy.get_secret_value() if project.proxy else None
-            repo = self._scm_cls.clone(
-                project.url,
-                repo_dir,
-                credential=project.eda_credential,
-                gpg_credential=project.signature_validation_credential,
-                depth=1,
-                verify_ssl=project.verify_ssl,
-                branch=project.scm_branch,
-                refspec=project.scm_refspec,
-                proxy=proxy,
-            )
-            yield repo_dir, repo.rev_parse("HEAD")
+            scm_type = project.scm_type
+            if scm_type == models.Project.ScmType.ARCHIVE:
+                revision = self._fetch_archive(project, repo_dir)
+            elif not scm_type:
+                revision = self._extract_upload(project, repo_dir)
+            else:
+                revision = self._clone_git(project, repo_dir)
+
+            yield repo_dir, revision
             if project.rulebook_set.count() == 0:
                 raise ProjectImportWarning(
                     "This project contains no rulebooks."
                 )
+
+    def _clone_git(
+        self,
+        project: models.Project,
+        repo_dir: str,
+    ) -> str:
+        proxy = project.proxy.get_secret_value() if project.proxy else None
+        repo = self._scm_cls.clone(
+            project.url,
+            repo_dir,
+            credential=project.eda_credential,
+            gpg_credential=(project.signature_validation_credential),
+            depth=1,
+            verify_ssl=project.verify_ssl,
+            branch=project.scm_branch,
+            refspec=project.scm_refspec,
+            proxy=proxy,
+        )
+        return repo.rev_parse("HEAD")
+
+    def _fetch_archive(
+        self,
+        project: models.Project,
+        repo_dir: str,
+    ) -> str:
+        proxy = project.proxy.get_secret_value() if project.proxy else None
+        username = None
+        password = None
+        if project.eda_credential:
+            inputs = credentials.get_resolved_secrets(project.eda_credential)
+            username = inputs.get("username")
+            password = inputs.get("password")
+
+        return download_and_extract(
+            project.url,
+            repo_dir,
+            username=username,
+            password=password,
+            verify_ssl=project.verify_ssl,
+            proxy=proxy,
+        )
+
+    def _extract_upload(
+        self,
+        project: models.Project,
+        repo_dir: str,
+    ) -> str:
+        if not project.archive_file:
+            raise ProjectImportError(
+                "No archive file uploaded for manual project"
+            )
+        archive_path = project.archive_file.path
+        checksum = _sha1_file(archive_path)
+        os.makedirs(repo_dir, exist_ok=True)
+        _extract_archive(archive_path, repo_dir)
+        return checksum
 
     def _temporary_directory(self) -> tempfile.TemporaryDirectory:
         return tempfile.TemporaryDirectory(prefix=TMP_PREFIX)

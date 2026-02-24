@@ -102,11 +102,12 @@ class ProjectCreateRequestSerializer(
         validators=[validators.check_credential_types_for_gpg],
     )
     url = serializers.CharField(
-        required=True,
-        allow_blank=False,
-        allow_null=False,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        default="",
         help_text="Source control repository URL.",
-        validators=[validators.check_if_scm_url_valid],
+        validators=[validators.check_if_scm_url_valid_optional],
     )
     scm_branch = serializers.CharField(
         required=False,
@@ -119,7 +120,7 @@ class ProjectCreateRequestSerializer(
         required=False,
         allow_blank=True,
         allow_null=True,
-        help_text="For git projects, an additional refspec to fetch.",
+        help_text=("For git projects, an additional refspec to fetch."),
         validators=[validators.check_if_refspec_valid],
     )
 
@@ -136,7 +137,7 @@ class ProjectCreateRequestSerializer(
     update_revision_on_launch = serializers.BooleanField(
         required=False,
         default=False,
-        help_text="Enable automatic project sync on activation launch",
+        help_text=("Enable automatic project sync on activation launch"),
     )
 
     class Meta:
@@ -156,6 +157,45 @@ class ProjectCreateRequestSerializer(
             "update_revision_on_launch",
             "scm_update_cache_timeout",
         ]
+
+    def validate(self, data):
+        scm_type = data.get("scm_type", models.Project.ScmType.GIT)
+        url = data.get("url", "")
+
+        if scm_type == models.Project.ScmType.GIT:
+            if not url:
+                raise serializers.ValidationError(
+                    {"url": ("URL is required for" " git projects.")}
+                )
+
+        elif scm_type == models.Project.ScmType.ARCHIVE:
+            if not url:
+                raise serializers.ValidationError(
+                    {"url": ("URL is required for" " archive projects.")}
+                )
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                raise serializers.ValidationError(
+                    {"url": ("Archive URL must use" " http or https scheme.")}
+                )
+            if data.get("scm_branch"):
+                raise serializers.ValidationError(
+                    {
+                        "scm_branch": (
+                            "Branch is not supported" " for archive projects."
+                        )
+                    }
+                )
+            if data.get("scm_refspec"):
+                raise serializers.ValidationError(
+                    {
+                        "scm_refspec": (
+                            "Refspec is not supported" " for archive projects."
+                        )
+                    }
+                )
+
+        return data
 
 
 class ProjectUpdateRequestSerializer(
